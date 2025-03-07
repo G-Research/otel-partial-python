@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import base64
 import collections
 import logging
 import os
@@ -478,7 +478,7 @@ def get_logdata(span, attributes):
     trace_flags=TraceFlags().get_default(),
     severity_text="INFO",
     severity_number=SeverityNumber.INFO,
-    body=bytes(serialized_traces_data),
+    body=base64.b64encode(serialized_traces_data).decode('utf-8'),
     attributes=attributes,
   )
   log_data = LogData(

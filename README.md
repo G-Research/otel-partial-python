@@ -4,6 +4,8 @@ OTEL Python SDK extension supporting partial spans
 ## build
 `python -m build`
 
+`pip install dist/partial_span_processor-0.0.x-py3-none-any.whl` to install locally
+
 ## publishing
 > requirement: `twine`
 
