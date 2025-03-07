@@ -48,3 +48,19 @@ with tracer.start_as_current_span("partial_span_1"):
 
 provider.shutdown()
 ```
+
+## usage config
+* install python version 3.13.1
+* create a working dir `test`
+* create venv `python3 -m venv venv`
+* copy above example script and name it `test.py`
+* create `requirements.txt` with content
+```
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
+opentelemetry-instrumentation-logging
+partial-span-processor
+```
+* install requirements `pip install -r requirements.txt`
+* run script `python test.py`
