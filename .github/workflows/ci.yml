@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  build-and-test:
+  build-test-and-upload:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,3 +26,11 @@ jobs:
 
       - name: Run tests
         run: pytest --tb=short tests
+
+      - name: Build
+        run: python -m build
+
+      - name: Upload Python Package
+        uses: actions/upload-artifact@v4
+        with:
+          path: dist/*.whl
