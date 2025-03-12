@@ -35,3 +35,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: dist/*.whl
+
+  release:
+    if: ${{ !github.event.repository.fork && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    needs: build-test-and-upload
+    permissions:
+      actions: write
+      contents: write
+      id-token: write
+    secrets: inherit
+    uses: ./.github/workflows/release.yml
