@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "partial-span-processor"
+name = "otel-partial-python"
 version = "0.0.2"
 authors = [
     { name = "Mladjan Gadzic", email = "gadzic.mladjan@gmail.com" }
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mladjan-gadzic/partial-span-processor"
+Homepage = "https://github.com/G-Research/otel-partial-python"
 
 [tool.setuptools]
 packages = ["partial_span_processor"]
