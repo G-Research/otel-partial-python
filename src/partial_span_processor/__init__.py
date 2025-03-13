@@ -146,19 +146,6 @@ class PartialSpanProcessor(SpanProcessor):
     self.log_processor.emit(log_data)
 
   def on_end(self, span: ReadableSpan) -> None:
-    span_key = (span.context.trace_id, span.context.span_id)
-    self.ended_spans.put((span_key, span))
-
-    attributes = {
-      "partial.event": "stop",
-      # TODO should this be removed?
-      "telemetry.logs.cluster": "partial",
-      "telemetry.logs.project": "span",
-    }
-
-    log_data = get_logdata(span, attributes)
-    self.log_processor.emit(log_data)
-
     if self.done:
       logger.warning("Already shutdown, dropping span.")
       return
@@ -339,6 +326,22 @@ class PartialSpanProcessor(SpanProcessor):
 
     # clean up list
     for index in range(idx):
+      span = self.spans_list[index]
+      if span is None:
+        continue
+
+      span_key = (span.context.trace_id, span.context.span_id)
+      self.ended_spans.put((span_key, span))
+
+      attributes = {
+        "partial.event": "stop",
+        "telemetry.logs.cluster": "partial",
+        "telemetry.logs.project": "span",
+      }
+
+      log_data = get_logdata(span, attributes)
+      self.log_processor.emit(log_data)
+
       self.spans_list[index] = None
     return idx
 
