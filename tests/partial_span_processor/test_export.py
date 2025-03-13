@@ -32,11 +32,12 @@ from opentelemetry.sdk.environment_variables import (
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import export
 from opentelemetry.sdk.trace.export import logger
-from tests.partial_span_processor.in_memory_log_exporter import InMemoryLogExporter
 from pytest import mark
 
 from src.partial_span_processor import PartialSpanProcessor
 from tests.partial_span_processor.concurrency_test import ConcurrencyTestBase
+from tests.partial_span_processor.in_memory_log_exporter import \
+  InMemoryLogExporter
 
 
 class MySpanExporter(export.SpanExporter):
@@ -160,13 +161,15 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
       span, parent_context=context
     )
 
-  def test_start_attributes(self):
+  def test_heartbeat_attributes(self):
     # pylint: disable=no-self-use
     my_exporter = MySpanExporter(destination=[])
     log_exporter = InMemoryLogExporter()
     log_processor = SimpleLogRecordProcessor(log_exporter)
+    schedule_delay_millis = 1234
     span_processor = mock.Mock(
-      wraps=PartialSpanProcessor(my_exporter, log_processor)
+      wraps=PartialSpanProcessor(my_exporter, log_processor,
+                                 schedule_delay_millis=schedule_delay_millis)
     )
     tracer_provider = trace.TracerProvider()
     tracer_provider.add_span_processor(span_processor)
@@ -181,7 +184,7 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
 
     expected_values = {
       'partial.event': 'heartbeat',
-      'partial.frequency': '5000ms',
+      'partial.frequency': str(schedule_delay_millis) + "ms",
       'telemetry.logs.cluster': 'partial',
       'telemetry.logs.project': 'span'
     }
@@ -193,12 +196,13 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
       for key, value in log.log_record.attributes.items():
         self.assertEqual(value, expected_values[key])
 
-
   def test_shutdown(self):
     spans_names_list = []
 
     my_exporter = MySpanExporter(destination=spans_names_list)
-    span_processor = export.BatchSpanProcessor(my_exporter)
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(my_exporter, log_processor)
 
     span_names = ["xxx", "bar", "foo"]
 
@@ -213,13 +217,14 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     # force_flush()
     self.assertListEqual(span_names, spans_names_list)
 
-  def test_end_attributes(self):
+  def test_stop_attributes(self):
     spans_names_list = []
 
     my_exporter = MySpanExporter(destination=spans_names_list)
     log_exporter = InMemoryLogExporter()
     log_processor = SimpleLogRecordProcessor(log_exporter)
-    span_processor = PartialSpanProcessor(my_exporter, log_processor)
+    span_processor = PartialSpanProcessor(my_exporter, log_processor,
+                                          schedule_delay_millis=10000)
 
     span_names = ["xxx"]
 
@@ -236,22 +241,25 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
 
     expected_values = {
       'partial.event': 'stop',
-      'partial.frequency': '5000ms',
       'telemetry.logs.cluster': 'partial',
       'telemetry.logs.project': 'span'
     }
 
     logs = log_exporter.get_finished_logs()
-    self.assertEqual(len(logs), 2)
+    for log in logs:
+      print(log.log_record.attributes)
+    self.assertEqual(len(logs), 3)
 
-    for key, value in logs[1].log_record.attributes.items():
+    for key, value in logs[2].log_record.attributes.items():
       self.assertEqual(value, expected_values[key])
 
   def test_flush(self):
     spans_names_list = []
 
     my_exporter = MySpanExporter(destination=spans_names_list)
-    span_processor = export.BatchSpanProcessor(my_exporter)
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(my_exporter, log_processor)
 
     span_names0 = ["xxx", "bar", "foo"]
     span_names1 = ["yyy", "baz", "fox"]
@@ -276,7 +284,9 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     spans_names_list = []
 
     my_exporter = MySpanExporter(destination=spans_names_list)
-    span_processor = export.BatchSpanProcessor(my_exporter)
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(my_exporter, log_processor)
 
     self.assertTrue(span_processor.force_flush())
 
@@ -287,8 +297,11 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     span_list = []
 
     my_exporter = MySpanExporter(destination=span_list)
-    span_processor = export.BatchSpanProcessor(
-      my_exporter, max_queue_size=512, max_export_batch_size=128
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(
+      my_exporter, max_queue_size=512, max_export_batch_size=128,
+      log_processor=log_processor
     )
 
     resource = Resource.create({})
@@ -316,7 +329,9 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     my_exporter = MySpanExporter(
       destination=spans_names_list, export_timeout_millis=500
     )
-    span_processor = export.BatchSpanProcessor(my_exporter)
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(my_exporter, log_processor)
 
     resource = Resource.create({})
     _create_start_and_end_span("foo", span_processor, resource)
@@ -333,8 +348,11 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     my_exporter = MySpanExporter(
       destination=spans_names_list, max_export_batch_size=128
     )
-    span_processor = export.BatchSpanProcessor(
-      my_exporter, max_queue_size=512, max_export_batch_size=128
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(
+      my_exporter, max_queue_size=512, max_export_batch_size=128,
+      log_processor=log_processor
     )
 
     resource = Resource.create({})
@@ -353,11 +371,14 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     my_exporter = MySpanExporter(
       destination=spans_names_list, max_export_batch_size=128
     )
-    span_processor = export.BatchSpanProcessor(
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(
       my_exporter,
       max_queue_size=256,
       max_export_batch_size=64,
       schedule_delay_millis=100,
+      log_processor=log_processor
     )
 
     resource = Resource.create({})
@@ -381,11 +402,14 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     my_exporter = MySpanExporter(
       destination=spans_names_list, max_export_batch_size=128
     )
-    span_processor = export.BatchSpanProcessor(
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(
       my_exporter,
       max_queue_size=256,
       max_export_batch_size=64,
       schedule_delay_millis=100,
+      log_processor=log_processor
     )
     tracer_provider.add_span_processor(span_processor)
     with tracer.start_as_current_span("foo"):
@@ -464,9 +488,12 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
       destination=spans_names_list, export_event=export_event
     )
     start_time = time.time()
-    span_processor = export.BatchSpanProcessor(
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(
       my_exporter,
       schedule_delay_millis=500,
+      log_processor=log_processor
     )
 
     # create single span
@@ -495,9 +522,12 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
       export_timeout_millis=50,
     )
 
-    span_processor = export.BatchSpanProcessor(
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
+    span_processor = PartialSpanProcessor(
       my_exporter,
       schedule_delay_millis=50,
+      log_processor=log_processor
     )
 
     with mock.patch.object(span_processor.condition, "wait") as mock_wait:
@@ -524,56 +554,65 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     span_processor.shutdown()
 
   def test_batch_span_processor_parameters(self):
+    log_exporter = InMemoryLogExporter()
+    log_processor = SimpleLogRecordProcessor(log_exporter)
     # zero max_queue_size
     self.assertRaises(
-      ValueError, export.BatchSpanProcessor, None, max_queue_size=0
+      ValueError, PartialSpanProcessor, None, max_queue_size=0,
+      log_processor=log_processor
     )
 
     # negative max_queue_size
     self.assertRaises(
       ValueError,
-      export.BatchSpanProcessor,
+      PartialSpanProcessor,
       None,
       max_queue_size=-500,
+      log_processor=log_processor
     )
 
     # zero schedule_delay_millis
     self.assertRaises(
       ValueError,
-      export.BatchSpanProcessor,
+      PartialSpanProcessor,
       None,
       schedule_delay_millis=0,
+      log_processor=log_processor
     )
 
     # negative schedule_delay_millis
     self.assertRaises(
       ValueError,
-      export.BatchSpanProcessor,
+      PartialSpanProcessor,
       None,
       schedule_delay_millis=-500,
+      log_processor=log_processor
     )
 
     # zero max_export_batch_size
     self.assertRaises(
       ValueError,
-      export.BatchSpanProcessor,
+      PartialSpanProcessor,
       None,
       max_export_batch_size=0,
+      log_processor=log_processor
     )
 
     # negative max_export_batch_size
     self.assertRaises(
       ValueError,
-      export.BatchSpanProcessor,
+      PartialSpanProcessor,
       None,
       max_export_batch_size=-500,
+      log_processor=log_processor
     )
 
     # max_export_batch_size > max_queue_size:
     self.assertRaises(
       ValueError,
-      export.BatchSpanProcessor,
+      PartialSpanProcessor,
       None,
       max_queue_size=256,
       max_export_batch_size=512,
+      log_processor=log_processor
     )
