@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "otel-partial-python"
+name = "partial_span_processor"
 version = "0.0.2"
 authors = [
     { name = "Mladjan Gadzic", email = "gadzic.mladjan@gmail.com" }
