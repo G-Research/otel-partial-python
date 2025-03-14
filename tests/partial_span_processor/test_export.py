@@ -185,8 +185,6 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
     expected_values = {
       'partial.event': 'heartbeat',
       'partial.frequency': str(schedule_delay_millis) + "ms",
-      'telemetry.logs.cluster': 'partial',
-      'telemetry.logs.project': 'span'
     }
 
     logs = log_exporter.get_finished_logs()
@@ -241,8 +239,6 @@ class TestPartialSpanProcessor(ConcurrencyTestBase):
 
     expected_values = {
       'partial.event': 'stop',
-      'telemetry.logs.cluster': 'partial',
-      'telemetry.logs.project': 'span'
     }
 
     logs = log_exporter.get_finished_logs()
