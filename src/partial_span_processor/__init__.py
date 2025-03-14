@@ -194,11 +194,7 @@ class PartialSpanProcessor(SpanProcessor):
   def get_heartbeat_attributes(self):
     return {
       "partial.event": "heartbeat",
-      "partial.frequency": str(self.schedule_delay_millis)
-                           + "ms",
-      # TODO should this be removed?
-      "telemetry.logs.cluster": "partial",
-      "telemetry.logs.project": "span",
+      "partial.frequency": str(self.schedule_delay_millis) + "ms",
     }
 
   def worker(self):
@@ -335,8 +331,6 @@ class PartialSpanProcessor(SpanProcessor):
 
       attributes = {
         "partial.event": "stop",
-        "telemetry.logs.cluster": "partial",
-        "telemetry.logs.project": "span",
       }
 
       log_data = get_logdata(span, attributes)
