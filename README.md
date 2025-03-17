@@ -63,6 +63,13 @@ partial-span-processor
 * run script `python test.py`
 
 ## publishing
-Python package is published to PyPI via the `release.yml` GitHub Action workflow(approval required) following [Trusted Publishers](https://docs.pypi.org/trusted-publishers/) pattern. The workflow is triggered when a new tag is pushed to the repository. Only push tags to the `master` branch with the format `vX.Y.Z` to trigger the workflow.
+Python package is published to PyPI via the `release.yml` GitHub Action workflow (approval required) following [Trusted Publishers](https://docs.pypi.org/trusted-publishers/) pattern. 
+The workflow is triggered when a new tag is pushed to the repository. Only tags with the format `vX.Y.Z` will trigger the workflow. It's the responsibility of the approver to check that the tag points to a commit on the `master` branch and that its name matches the version in `pyproject.toml`.
+
+Checklist:
+- Bump the version in `pyproject.toml` via pull request
+- Create a tag on `master` with the format `vX.Y.Z` and push it
+- Review the workflow approval request - the tag should point to a commit on the `master` branch!
+- Success
 
 Link to PyPI: https://pypi.org/project/partial-span-processor/
