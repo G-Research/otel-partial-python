@@ -6,11 +6,6 @@ OTEL Python SDK extension supporting partial spans
 
 `pip install dist/partial_span_processor-0.0.x-py3-none-any.whl` to install locally
 
-## publishing
-> requirement: `twine`
-
-`python3 -m twine upload --repository pypi dist/* `
-
 ## usage
 ```python
 import time
@@ -66,3 +61,15 @@ partial-span-processor
 ```
 * install requirements `pip install -r requirements.txt`
 * run script `python test.py`
+
+## publishing
+Python package is published to PyPI via the `release.yml` GitHub Action workflow (approval required) following [Trusted Publishers](https://docs.pypi.org/trusted-publishers/) pattern. 
+The workflow is triggered when a new tag is pushed to the repository. Only tags with the format `vX.Y.Z` will trigger the workflow. It's the responsibility of the approver to check that the tag points to a commit on the `master` branch and that its name matches the version in `pyproject.toml`.
+
+Checklist:
+- Bump the version in `pyproject.toml` via pull request
+- Create a tag on `master` with the format `vX.Y.Z` and push it
+- Review the workflow approval request - the tag should point to a commit on the `master` branch!
+- Success
+
+Link to PyPI: https://pypi.org/project/partial-span-processor/
