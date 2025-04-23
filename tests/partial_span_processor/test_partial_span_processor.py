@@ -15,6 +15,7 @@
 import unittest
 from time import sleep
 
+from opentelemetry.sdk._logs._internal.export import SimpleLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import SpanContext, TraceFlags
@@ -22,8 +23,6 @@ from opentelemetry.trace import SpanContext, TraceFlags
 from src.partial_span_processor import PartialSpanProcessor
 from tests.partial_span_processor.in_memory_log_exporter import \
   InMemoryLogExporter
-from tests.partial_span_processor.simple_log_record_processor import \
-  SimpleLogRecordProcessor
 
 
 class TestPartialSpanProcessor(unittest.TestCase):
