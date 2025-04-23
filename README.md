@@ -13,7 +13,7 @@ Check example.py script in the root of the repo.
 * install python version >= 3.8
 * create a working dir `test`
 * create venv `python3 -m venv venv`
-* copy example script `test.py`
+* copy example script `example.py`
 * create `requirements.txt` with content
 ```
 opentelemetry-api
