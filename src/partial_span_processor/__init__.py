@@ -22,7 +22,8 @@ from opentelemetry import context as context_api
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.proto.trace.v1 import trace_pb2
-from opentelemetry.sdk._logs import LogData, LogRecord, LogRecordProcessor
+from opentelemetry.sdk._logs import LogData, LogRecord
+from opentelemetry.sdk._logs.export import LogExporter
 from opentelemetry.sdk.trace import (
   SpanProcessor,
   Span,
@@ -37,13 +38,13 @@ class PartialSpanProcessor(SpanProcessor):
 
   def __init__(
       self,
-      log_record_processor: LogRecordProcessor,
-      log_emit_interval: int
+      log_exporter: LogExporter,
+      heartbeat_interval_ms: int
   ):
-    if log_emit_interval <= 0:
-      raise ValueError("log_emit_interval must be greater than 0")
-    self.log_record_processor = log_record_processor
-    self.log_emit_interval = log_emit_interval
+    if heartbeat_interval_ms <= 0:
+      raise ValueError("heartbeat_interval_ms must be greater than 0")
+    self.log_exporter = log_exporter
+    self.heartbeat_interval_ms = heartbeat_interval_ms
 
     self.active_spans = {}
     self.ended_spans = Queue()
@@ -59,7 +60,7 @@ class PartialSpanProcessor(SpanProcessor):
   def worker(self):
     while not self.done:
       with self.condition:
-        self.condition.wait(self.log_emit_interval / 1000)
+        self.condition.wait(self.heartbeat_interval_ms / 1000)
         if self.done:
           break
 
@@ -77,13 +78,13 @@ class PartialSpanProcessor(SpanProcessor):
       for span_key, span in list(self.active_spans.items()):
         attributes = self.get_heartbeat_attributes()
         log_data = get_log_data(span, attributes)
-        self.log_record_processor.emit(log_data)
+        self.log_exporter.export([log_data])
 
   def on_start(self, span: "Span",
       parent_context: Optional[context_api.Context] = None) -> None:
     attributes = self.get_heartbeat_attributes()
     log_data = get_log_data(span, attributes)
-    self.log_record_processor.emit(log_data)
+    self.log_exporter.export([log_data])
 
     span_key = (span.context.trace_id, span.context.span_id)
     with self.lock:
@@ -92,7 +93,7 @@ class PartialSpanProcessor(SpanProcessor):
   def on_end(self, span: ReadableSpan) -> None:
     attributes = get_stop_attributes()
     log_data = get_log_data(span, attributes)
-    self.log_record_processor.emit(log_data)
+    self.log_exporter.export([log_data])
 
     span_key = (span.context.trace_id, span.context.span_id)
     self.ended_spans.put((span_key, span))
@@ -107,7 +108,7 @@ class PartialSpanProcessor(SpanProcessor):
   def get_heartbeat_attributes(self):
     return {
       "partial.event": "heartbeat",
-      "partial.frequency": str(self.log_emit_interval) + "ms",
+      "partial.frequency": str(self.heartbeat_interval_ms) + "ms",
     }
 
 

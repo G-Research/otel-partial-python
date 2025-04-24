@@ -15,7 +15,6 @@
 import unittest
 from time import sleep
 
-from opentelemetry.sdk._logs._internal.export import SimpleLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import SpanContext, TraceFlags
@@ -29,10 +28,9 @@ class TestPartialSpanProcessor(unittest.TestCase):
   def setUp(self):
     # Set up an in-memory log exporter and processor
     self.log_exporter = InMemoryLogExporter()
-    self.log_record_processor = SimpleLogRecordProcessor(self.log_exporter)
     self.processor = PartialSpanProcessor(
-      log_record_processor=self.log_record_processor,
-      log_emit_interval=1000,  # 1 second
+      log_exporter=self.log_exporter,
+      heartbeat_interval_ms=1000,  # 1 second
     )
 
   def tearDown(self):
