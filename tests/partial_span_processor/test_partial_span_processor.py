@@ -30,7 +30,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
     self.log_exporter = InMemoryLogExporter()
     self.processor = PartialSpanProcessor(
       log_exporter=self.log_exporter,
-      heartbeat_interval_ms=1000,  # 1 second
+      heartbeat_interval_millis=1000,  # 1 second
     )
 
   def tearDown(self):
