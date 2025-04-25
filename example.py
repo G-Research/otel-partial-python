@@ -4,7 +4,6 @@ from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import \
   OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs._internal.export import SimpleLogRecordProcessor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
@@ -16,8 +15,7 @@ span_exporter = OTLPSpanExporter(endpoint="localhost:4317",
                                  insecure=True)  # grpc
 
 # Configure span processors
-partial_span_processor = PartialSpanProcessor(
-  SimpleLogRecordProcessor(log_exporter), log_emit_interval=5000)
+partial_span_processor = PartialSpanProcessor(log_exporter, 5000)
 batch_span_processor = BatchSpanProcessor(span_exporter)
 
 # Create a TracerProvider

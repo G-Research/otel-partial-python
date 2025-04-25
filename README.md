@@ -1,6 +1,15 @@
 # partial-span-processor
 OTEL Python SDK extension supporting partial spans
 
+## install
+<a href="https://pypi.org/project/partial-span-processor/">
+  <img src="https://img.shields.io/pypi/v/partial-span-processor.svg" alt="PyPi Latest Release"/>
+</a>
+
+```bash
+pip install partial_span_processor
+```
+
 ## build
 `python -m build`
 
