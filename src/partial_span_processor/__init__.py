@@ -39,12 +39,12 @@ class PartialSpanProcessor(SpanProcessor):
   def __init__(
       self,
       log_exporter: LogExporter,
-      heartbeat_interval_ms: int
+      heartbeat_interval_millis: int
   ):
-    if heartbeat_interval_ms <= 0:
+    if heartbeat_interval_millis <= 0:
       raise ValueError("heartbeat_interval_ms must be greater than 0")
     self.log_exporter = log_exporter
-    self.heartbeat_interval_ms = heartbeat_interval_ms
+    self.heartbeat_interval_millis = heartbeat_interval_millis
 
     self.active_spans = {}
     self.ended_spans = Queue()
@@ -60,7 +60,7 @@ class PartialSpanProcessor(SpanProcessor):
   def worker(self):
     while not self.done:
       with self.condition:
-        self.condition.wait(self.heartbeat_interval_ms / 1000)
+        self.condition.wait(self.heartbeat_interval_millis / 1000)
         if self.done:
           break
 
@@ -108,7 +108,7 @@ class PartialSpanProcessor(SpanProcessor):
   def get_heartbeat_attributes(self):
     return {
       "partial.event": "heartbeat",
-      "partial.frequency": str(self.heartbeat_interval_ms) + "ms",
+      "partial.frequency": str(self.heartbeat_interval_millis) + "ms",
     }
 
 
