@@ -17,27 +17,27 @@ from time import sleep
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.trace import SpanContext, TraceFlags
+from opentelemetry.trace import Span, SpanContext, TraceFlags
 
 from src.partial_span_processor import PartialSpanProcessor
-from tests.partial_span_processor.in_memory_log_exporter import \
-  InMemoryLogExporter
+from tests.partial_span_processor.in_memory_log_exporter import InMemoryLogExporter
 
 
 class TestPartialSpanProcessor(unittest.TestCase):
-  def setUp(self):
+  def setUp(self) -> None:
     # Set up an in-memory log exporter and processor
     self.log_exporter = InMemoryLogExporter()
     self.processor = PartialSpanProcessor(
       log_exporter=self.log_exporter,
       heartbeat_interval_millis=1000,  # 1 second
+      resource=Resource(attributes={"service.name": "test"}),
     )
 
-  def tearDown(self):
+  def tearDown(self) -> None:
     # Shut down the processor
     self.processor.shutdown()
 
-  def create_mock_span(self, trace_id=1, span_id=1):
+  def create_mock_span(self, trace_id: int = 1, span_id: int = 1) -> Span:
     # Create a mock tracer
     tracer_provider = TracerProvider(resource=Resource.create({}))
     tracer = tracer_provider.get_tracer("test_tracer")
@@ -54,36 +54,37 @@ class TestPartialSpanProcessor(unittest.TestCase):
       span._context = span_context  # Modify the span's context for testing
       return span
 
-  def test_on_start(self):
+  def test_on_start(self) -> None:
     # Test the on_start method
     span = self.create_mock_span()
     self.processor.on_start(span)
 
     # Verify the span is added to active_spans
     span_key = (span.context.trace_id, span.context.span_id)
-    self.assertIn(span_key, self.processor.active_spans)
+    assert span_key in self.processor.active_spans
 
     # Verify a log is emitted
     logs = self.log_exporter.get_finished_logs()
-    self.assertEqual(len(logs), 1)
-    self.assertEqual(logs[0].log_record.attributes["partial.event"],
-                     "heartbeat")
+    assert len(logs) == 1
+    assert logs[0].log_record.attributes["partial.event"] == "heartbeat"
+    assert logs[0].log_record.resource.attributes["service.name"] == "test"
 
-  def test_on_end(self):
+  def test_on_end(self) -> None:
     # Test the on_end method
     span = self.create_mock_span()
     self.processor.on_start(span)
     self.processor.on_end(span)
 
     # Verify the span is added to ended_spans
-    self.assertFalse(self.processor.ended_spans.empty())
+    assert not self.processor.ended_spans.empty()
 
     # Verify a log is emitted
     logs = self.log_exporter.get_finished_logs()
-    self.assertEqual(len(logs), 2)
-    self.assertEqual(logs[1].log_record.attributes["partial.event"], "stop")
+    assert len(logs) == 2
+    assert logs[1].log_record.attributes["partial.event"] == "stop"
+    assert logs[0].log_record.resource.attributes["service.name"] == "test"
 
-  def test_heartbeat(self):
+  def test_heartbeat(self) -> None:
     # Test the heartbeat method
     span = self.create_mock_span()
     self.processor.on_start(span)
@@ -93,18 +94,18 @@ class TestPartialSpanProcessor(unittest.TestCase):
     logs = self.log_exporter.get_finished_logs()
 
     # Verify heartbeat logs are emitted
-    self.assertGreaterEqual(len(logs), 2)
-    self.assertEqual(logs[1].log_record.attributes["partial.event"],
-                     "heartbeat")
+    assert len(logs) >= 2
+    assert logs[1].log_record.attributes["partial.event"] == "heartbeat"
+    assert logs[0].log_record.resource.attributes["service.name"] == "test"
 
-  def test_shutdown(self):
+  def test_shutdown(self) -> None:
     # Test the shutdown method
     self.processor.shutdown()
 
     # Verify the worker thread is stopped
-    self.assertTrue(self.processor.done)
+    assert self.processor.done
 
-  def test_worker_thread(self):
+  def test_worker_thread(self) -> None:
     # Test the worker thread processes ended spans
     span = self.create_mock_span()
     self.processor.on_start(span)
@@ -115,7 +116,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
 
     # Verify the span is removed from active_spans
     span_key = (span.context.trace_id, span.context.span_id)
-    self.assertNotIn(span_key, self.processor.active_spans)
+    assert span_key not in self.processor.active_spans
 
 
 if __name__ == "__main__":
