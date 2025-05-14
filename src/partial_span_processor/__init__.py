@@ -12,24 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import base64
 import threading
 import time
 from queue import Queue
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from opentelemetry import context as context_api
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.proto.trace.v1 import trace_pb2
 from opentelemetry.sdk._logs import LogData, LogRecord
-from opentelemetry.sdk._logs.export import LogExporter
-from opentelemetry.sdk.trace import (
-  SpanProcessor,
-  Span,
-  ReadableSpan
-)
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import TraceFlags
+
+if TYPE_CHECKING:
+  from opentelemetry import context as context_api
+  from opentelemetry.sdk._logs.export import LogExporter
+  from opentelemetry.sdk.resources import Resource
 
 WORKER_THREAD_NAME = "OtelPartialSpanProcessor"
 
@@ -39,12 +40,15 @@ class PartialSpanProcessor(SpanProcessor):
   def __init__(
       self,
       log_exporter: LogExporter,
-      heartbeat_interval_millis: int
-  ):
+      heartbeat_interval_millis: int,
+      resource: Resource | None = None,
+  ) -> None:
     if heartbeat_interval_millis <= 0:
-      raise ValueError("heartbeat_interval_ms must be greater than 0")
+      msg = "heartbeat_interval_ms must be greater than 0"
+      raise ValueError(msg)
     self.log_exporter = log_exporter
     self.heartbeat_interval_millis = heartbeat_interval_millis
+    self.resource = resource
 
     self.active_spans = {}
     self.ended_spans = Queue()
@@ -53,11 +57,11 @@ class PartialSpanProcessor(SpanProcessor):
     self.done = False
     self.condition = threading.Condition(threading.Lock())
     self.worker_thread = threading.Thread(
-      name=WORKER_THREAD_NAME, target=self.worker, daemon=True
+      name=WORKER_THREAD_NAME, target=self.worker, daemon=True,
     )
     self.worker_thread.start()
 
-  def worker(self):
+  def worker(self) -> None:
     while not self.done:
       with self.condition:
         self.condition.wait(self.heartbeat_interval_millis / 1000)
@@ -73,17 +77,17 @@ class PartialSpanProcessor(SpanProcessor):
 
       self.heartbeat()
 
-  def heartbeat(self):
+  def heartbeat(self) -> None:
     with self.lock:
-      for span_key, span in list(self.active_spans.items()):
+      for span in list(self.active_spans.values()):
         attributes = self.get_heartbeat_attributes()
-        log_data = get_log_data(span, attributes)
+        log_data = self.get_log_data(span, attributes)
         self.log_exporter.export([log_data])
 
-  def on_start(self, span: "Span",
-      parent_context: Optional[context_api.Context] = None) -> None:
+  def on_start(self, span: Span,
+      parent_context: context_api.Context | None = None) -> None:
     attributes = self.get_heartbeat_attributes()
-    log_data = get_log_data(span, attributes)
+    log_data = self.get_log_data(span, attributes)
     self.log_exporter.export([log_data])
 
     span_key = (span.context.trace_id, span.context.span_id)
@@ -92,7 +96,7 @@ class PartialSpanProcessor(SpanProcessor):
 
   def on_end(self, span: ReadableSpan) -> None:
     attributes = get_stop_attributes()
-    log_data = get_log_data(span, attributes)
+    log_data = self.get_log_data(span, attributes)
     self.log_exporter.export([log_data])
 
     span_key = (span.context.trace_id, span.context.span_id)
@@ -105,39 +109,38 @@ class PartialSpanProcessor(SpanProcessor):
       self.condition.notify_all()
     self.worker_thread.join()
 
-  def get_heartbeat_attributes(self):
+  def get_heartbeat_attributes(self) -> dict[str, str]:
     return {
       "partial.event": "heartbeat",
       "partial.frequency": str(self.heartbeat_interval_millis) + "ms",
     }
 
+  def get_log_data(self, span: Span, attributes: dict[str, str]) -> LogData:
+    span_context = Span.get_span_context(span)
 
-def get_stop_attributes():
+    enc_spans = encode_spans([span]).resource_spans
+    traces_data = trace_pb2.TracesData()
+    traces_data.resource_spans.extend(enc_spans)
+    serialized_traces_data = traces_data.SerializeToString()
+
+    log_record = LogRecord(
+      timestamp=time.time_ns(),
+      observed_timestamp=time.time_ns(),
+      trace_id=span_context.trace_id,
+      span_id=span_context.span_id,
+      trace_flags=TraceFlags().get_default(),
+      severity_text="INFO",
+      severity_number=SeverityNumber.INFO,
+      body=base64.b64encode(serialized_traces_data).decode("utf-8"),
+      resource=self.resource,
+      attributes=attributes,
+    )
+    return LogData(
+      log_record=log_record, instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+def get_stop_attributes() -> dict[str, str]:
   return {
     "partial.event": "stop",
   }
-
-
-def get_log_data(span, attributes):
-  span_context = Span.get_span_context(span)
-
-  enc_spans = encode_spans([span]).resource_spans
-  traces_data = trace_pb2.TracesData()
-  traces_data.resource_spans.extend(enc_spans)
-  serialized_traces_data = traces_data.SerializeToString()
-
-  log_record = LogRecord(
-    timestamp=time.time_ns(),
-    observed_timestamp=time.time_ns(),
-    trace_id=span_context.trace_id,
-    span_id=span_context.span_id,
-    trace_flags=TraceFlags().get_default(),
-    severity_text="INFO",
-    severity_number=SeverityNumber.INFO,
-    body=base64.b64encode(serialized_traces_data).decode('utf-8'),
-    attributes=attributes,
-  )
-  log_data = LogData(
-    log_record=log_record, instrumentation_scope=span.instrumentation_scope
-  )
-  return log_data

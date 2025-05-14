@@ -12,11 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import threading
 import typing
 
-from opentelemetry.sdk._logs import LogData
 from opentelemetry.sdk._logs.export import LogExporter, LogExportResult
+
+if typing.TYPE_CHECKING:
+  from opentelemetry.sdk._logs import LogData
 
 
 class InMemoryLogExporter(LogExporter):
@@ -27,7 +31,7 @@ class InMemoryLogExporter(LogExporter):
   :func:`.get_finished_logs` method.
   """
 
-  def __init__(self):
+  def __init__(self) -> None:
     self._logs = []
     self._lock = threading.Lock()
     self._stopped = False
@@ -36,7 +40,7 @@ class InMemoryLogExporter(LogExporter):
     with self._lock:
       self._logs.clear()
 
-  def get_finished_logs(self) -> typing.Tuple[LogData, ...]:
+  def get_finished_logs(self) -> tuple[LogData, ...]:
     with self._lock:
       return tuple(self._logs)
 
