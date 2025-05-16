@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from queue import Queue
@@ -117,12 +118,28 @@ class PartialSpanProcessor(SpanProcessor):
     }
 
   def get_log_data(self, span: Span, attributes: dict[str, str]) -> LogData:
-    span_context = Span.get_span_context(span)
+    instrumentation_scope = span.instrumentation_scope if hasattr(span,
+                                                                  "instrumentation_scope") else None
+    span_context = span.get_span_context()
 
     enc_spans = encode_spans([span]).resource_spans
     traces_data = trace_pb2.TracesData()
     traces_data.resource_spans.extend(enc_spans)
     serialized_traces_data = json_format.MessageToJson(traces_data)
+
+    # FIXME/HACK replace serialized traceId and spanId values as string comparison
+    # possible issue is when there are multiple spans in the same trace.
+    # currently that should not be the case.
+    # trace_id and span_id are stored as int.
+    # when serializing it gets serialized to bytes.
+    # that is not inline with partial collector.
+    traces_dict = json.loads(serialized_traces_data)
+    for resource_span in traces_dict.get("resourceSpans", []):
+      for scope_span in resource_span.get("scopeSpans", []):
+        for span in scope_span.get("spans", []):
+          span["traceId"] = hex(span_context.trace_id)[2:]
+          span["spanId"] = hex(span_context.span_id)[2:]
+    serialized_traces_data = json.dumps(traces_dict)
 
     log_record = LogRecord(
       timestamp=time.time_ns(),
@@ -137,7 +154,7 @@ class PartialSpanProcessor(SpanProcessor):
       attributes=attributes,
     )
     return LogData(
-      log_record=log_record, instrumentation_scope=span.instrumentation_scope,
+      log_record=log_record, instrumentation_scope=instrumentation_scope,
     )
 
 
