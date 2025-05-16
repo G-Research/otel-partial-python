@@ -14,19 +14,18 @@
 
 from __future__ import annotations
 
-import base64
 import threading
 import time
 from queue import Queue
 from typing import TYPE_CHECKING
 
+from google.protobuf import json_format
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.proto.trace.v1 import trace_pb2
 from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import TraceFlags
-from google.protobuf import json_format
 
 if TYPE_CHECKING:
   from opentelemetry import context as context_api
