@@ -26,6 +26,7 @@ from opentelemetry.proto.trace.v1 import trace_pb2
 from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import TraceFlags
+from google.protobuf import json_format
 
 if TYPE_CHECKING:
   from opentelemetry import context as context_api
@@ -113,6 +114,7 @@ class PartialSpanProcessor(SpanProcessor):
     return {
       "partial.event": "heartbeat",
       "partial.frequency": str(self.heartbeat_interval_millis) + "ms",
+      "partial.body.type": "json/v1",
     }
 
   def get_log_data(self, span: Span, attributes: dict[str, str]) -> LogData:
@@ -121,7 +123,7 @@ class PartialSpanProcessor(SpanProcessor):
     enc_spans = encode_spans([span]).resource_spans
     traces_data = trace_pb2.TracesData()
     traces_data.resource_spans.extend(enc_spans)
-    serialized_traces_data = traces_data.SerializeToString()
+    serialized_traces_data = json_format.MessageToJson(traces_data)
 
     log_record = LogRecord(
       timestamp=time.time_ns(),
@@ -131,7 +133,7 @@ class PartialSpanProcessor(SpanProcessor):
       trace_flags=TraceFlags().get_default(),
       severity_text="INFO",
       severity_number=SeverityNumber.INFO,
-      body=base64.b64encode(serialized_traces_data).decode("utf-8"),
+      body=serialized_traces_data,
       resource=self.resource,
       attributes=attributes,
     )
@@ -143,4 +145,5 @@ class PartialSpanProcessor(SpanProcessor):
 def get_stop_attributes() -> dict[str, str]:
   return {
     "partial.event": "stop",
+    "partial.body.type": "json/v1",
   }
