@@ -121,13 +121,14 @@ class PartialSpanProcessor(SpanProcessor):
     instrumentation_scope = span.instrumentation_scope if hasattr(span,
                                                                   "instrumentation_scope") else None
     span_context = span.get_span_context()
+    parent = span.parent
 
     enc_spans = encode_spans([span]).resource_spans
     traces_data = trace_pb2.TracesData()
     traces_data.resource_spans.extend(enc_spans)
     serialized_traces_data = json_format.MessageToJson(traces_data)
 
-    # FIXME/HACK replace serialized traceId and spanId values as string comparison
+    # FIXME/HACK replace serialized traceId, spanId, and parentSpanId (if present) values as string comparison
     # possible issue is when there are multiple spans in the same trace.
     # currently that should not be the case.
     # trace_id and span_id are stored as int.
@@ -139,7 +140,10 @@ class PartialSpanProcessor(SpanProcessor):
         for span in scope_span.get("spans", []):
           span["traceId"] = hex(span_context.trace_id)[2:]
           span["spanId"] = hex(span_context.span_id)[2:]
-    serialized_traces_data = json.dumps(traces_dict, separators=(',', ':'))
+          if parent:
+            span["parentSpanId"] = hex(parent.span_id)[2:]
+
+    serialized_traces_data = json.dumps(traces_dict, separators=(",", ":"))
 
     log_record = LogRecord(
       timestamp=time.time_ns(),
