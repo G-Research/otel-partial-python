@@ -139,7 +139,7 @@ class PartialSpanProcessor(SpanProcessor):
         for span in scope_span.get("spans", []):
           span["traceId"] = hex(span_context.trace_id)[2:]
           span["spanId"] = hex(span_context.span_id)[2:]
-    serialized_traces_data = json.dumps(traces_dict)
+    serialized_traces_data = json.dumps(traces_dict, separators=(',', ':'))
 
     log_record = LogRecord(
       timestamp=time.time_ns(),
