@@ -113,7 +113,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
     logs = self.log_exporter.get_finished_logs()
     assert len(logs) == 1
 
-    sleep(1.5)
+    sleep(1)
 
     logs = self.log_exporter.get_finished_logs()
     assert len(logs) == 2
