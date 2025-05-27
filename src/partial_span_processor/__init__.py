@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import threading
 import time
-from queue import Queue
 from typing import TYPE_CHECKING
 
 from google.protobuf import json_format
@@ -52,7 +51,6 @@ class PartialSpanProcessor(SpanProcessor):
     self.resource = resource
 
     self.active_spans = {}
-    self.ended_spans = Queue()
     self.lock = threading.Lock()
 
     self.done = False
@@ -69,39 +67,35 @@ class PartialSpanProcessor(SpanProcessor):
         if self.done:
           break
 
-      # Remove ended spans from active spans
-      with self.lock:
-        while not self.ended_spans.empty():
-          span_key, span = self.ended_spans.get()
-          if span_key in self.active_spans:
-            del self.active_spans[span_key]
-
       self.heartbeat()
 
   def heartbeat(self) -> None:
     with self.lock:
       for span in list(self.active_spans.values()):
-        attributes = self.get_heartbeat_attributes()
-        log_data = self.get_log_data(span, attributes)
-        self.log_exporter.export([log_data])
+        self.export_log(span, self.get_heartbeat_attributes())
 
   def on_start(self, span: Span,
       parent_context: context_api.Context | None = None) -> None:
-    attributes = self.get_heartbeat_attributes()
-    log_data = self.get_log_data(span, attributes)
-    self.log_exporter.export([log_data])
+    self.export_log(span, self.get_heartbeat_attributes())
+    self.add_active_span(span)
 
+  def add_active_span(self, span: Span) -> None:
     span_key = (span.context.trace_id, span.context.span_id)
     with self.lock:
       self.active_spans[span_key] = span
 
   def on_end(self, span: ReadableSpan) -> None:
-    attributes = get_stop_attributes()
+    self.export_log(span, get_stop_attributes())
+    self.remove_ended_span(span)
+
+  def remove_ended_span(self, span: ReadableSpan) -> None:
+    span_key = (span.context.trace_id, span.context.span_id)
+    with self.lock:
+      self.active_spans.pop(span_key)
+
+  def export_log(self, span, attributes: dict[str, str]) -> None:
     log_data = self.get_log_data(span, attributes)
     self.log_exporter.export([log_data])
-
-    span_key = (span.context.trace_id, span.context.span_id)
-    self.ended_spans.put((span_key, span))
 
   def shutdown(self) -> None:
     # signal the worker thread to finish and then wait for it

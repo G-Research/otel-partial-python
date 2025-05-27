@@ -75,8 +75,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
     self.processor.on_start(span)
     self.processor.on_end(span)
 
-    # Verify the span is added to ended_spans
-    assert not self.processor.ended_spans.empty()
+    assert len(self.processor.active_spans) == 0
 
     # Verify a log is emitted
     logs = self.log_exporter.get_finished_logs()
