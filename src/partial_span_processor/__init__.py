@@ -138,10 +138,10 @@ class PartialSpanProcessor(SpanProcessor):
     for resource_span in traces_dict.get("resourceSpans", []):
       for scope_span in resource_span.get("scopeSpans", []):
         for span in scope_span.get("spans", []):
-          span["traceId"] = hex(span_context.trace_id)[2:]
-          span["spanId"] = hex(span_context.span_id)[2:]
+          span["traceId"] = f"{span_context.trace_id:032x}"
+          span["spanId"] = f"{span_context.span_id:016x}"
           if parent:
-            span["parentSpanId"] = hex(parent.span_id)[2:]
+            span["parentSpanId"] = f"{parent.span_id:016x}"
 
     serialized_traces_data = json.dumps(traces_dict, separators=(",", ":"))
 
