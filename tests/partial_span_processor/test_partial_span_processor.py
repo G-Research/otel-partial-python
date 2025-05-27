@@ -30,6 +30,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
     self.processor = PartialSpanProcessor(
       log_exporter=self.log_exporter,
       heartbeat_interval_millis=1000,  # 1 second
+      heartbeat_delay_millis=0, # no initial delay
       resource=Resource(attributes={"service.name": "test"}),
     )
 
@@ -83,7 +84,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
     assert logs[1].log_record.attributes["partial.event"] == "stop"
     assert logs[0].log_record.resource.attributes["service.name"] == "test"
 
-  def test_heartbeat(self) -> None:
+  def test_heartbeat_without_delay(self) -> None:
     # Test the heartbeat method
     span = self.create_mock_span()
     self.processor.on_start(span)
@@ -94,6 +95,28 @@ class TestPartialSpanProcessor(unittest.TestCase):
 
     # Verify heartbeat logs are emitted
     assert len(logs) >= 2
+    assert logs[1].log_record.attributes["partial.event"] == "heartbeat"
+    assert logs[0].log_record.resource.attributes["service.name"] == "test"
+
+  def test_heartbeat_with_delay(self) -> None:
+    processor = PartialSpanProcessor(
+      log_exporter=self.log_exporter,
+      heartbeat_interval_millis=1000,
+      heartbeat_delay_millis=1500,
+      resource=Resource(attributes={"service.name": "test"}),
+    )
+
+    span = self.create_mock_span()
+    processor.on_start(span)
+
+    sleep(1.5)
+    logs = self.log_exporter.get_finished_logs()
+    assert len(logs) == 1
+
+    sleep(1.5)
+
+    logs = self.log_exporter.get_finished_logs()
+    assert len(logs) == 2
     assert logs[1].log_record.attributes["partial.event"] == "heartbeat"
     assert logs[0].log_record.resource.attributes["service.name"] == "test"
 

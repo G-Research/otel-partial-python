@@ -33,6 +33,8 @@ if TYPE_CHECKING:
   from opentelemetry.sdk.resources import Resource
 
 WORKER_THREAD_NAME = "OtelPartialSpanProcessor"
+DEFAULT_HEARTBEAT_INTERVAL_MILLIS = 5000
+DEFAULT_HEARTBEAT_DELAY_MILLIS = 5000
 
 
 class PartialSpanProcessor(SpanProcessor):
@@ -40,14 +42,21 @@ class PartialSpanProcessor(SpanProcessor):
   def __init__(
       self,
       log_exporter: LogExporter,
-      heartbeat_interval_millis: int,
+      heartbeat_interval_millis: int = DEFAULT_HEARTBEAT_INTERVAL_MILLIS,
+      heartbeat_delay_millis: int = DEFAULT_HEARTBEAT_DELAY_MILLIS,
       resource: Resource | None = None,
   ) -> None:
     if heartbeat_interval_millis <= 0:
-      msg = "heartbeat_interval_ms must be greater than 0"
+      msg = "heartbeat_interval_millis must be greater than 0"
       raise ValueError(msg)
-    self.log_exporter = log_exporter
     self.heartbeat_interval_millis = heartbeat_interval_millis
+
+    if heartbeat_delay_millis < 0:
+      msg = "heartbeat_delay_millis must be greater or equal to 0"
+      raise ValueError(msg)
+    self.heartbeat_delay_millis = heartbeat_delay_millis
+
+    self.log_exporter = log_exporter
     self.resource = resource
 
     self.active_spans = {}
@@ -71,8 +80,11 @@ class PartialSpanProcessor(SpanProcessor):
 
   def heartbeat(self) -> None:
     with self.lock:
+      current_time_ms = time.time() * 1000
       for span in list(self.active_spans.values()):
-        self.export_log(span, self.get_heartbeat_attributes())
+        span.start_time_ms = span.start_time / 1_000_000
+        if current_time_ms - span.start_time_ms >= self.heartbeat_delay_millis:
+          self.export_log(span, self.get_heartbeat_attributes())
 
   def on_start(self, span: Span,
       parent_context: context_api.Context | None = None) -> None:
