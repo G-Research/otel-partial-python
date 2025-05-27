@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "partial_span_processor"
-version = "0.0.8"
+version = "0.0.9"
 authors = [
     { name = "Mladjan Gadzic", email = "gadzic.mladjan@gmail.com" }
 ]
