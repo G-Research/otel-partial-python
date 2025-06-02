@@ -15,7 +15,10 @@ span_exporter = OTLPSpanExporter(endpoint="localhost:4317",
                                  insecure=True)  # grpc
 
 # Configure span processors
-partial_span_processor = PartialSpanProcessor(log_exporter, 5000)
+partial_span_processor = PartialSpanProcessor(log_exporter=log_exporter,
+                                              heartbeat_interval_millis=1000,
+                                              initial_heartbeat_delay_millis=6000,
+                                              process_interval_millis=1000)
 batch_span_processor = BatchSpanProcessor(span_exporter)
 
 # Create a TracerProvider
@@ -31,4 +34,4 @@ tracer = trace.get_tracer(__name__)
 # Start a span (logs heartbeat and stop events)
 with tracer.start_as_current_span("partial_span_1"):
   print("partial_span_1 is running")
-  sleep(10)
+  sleep(8)

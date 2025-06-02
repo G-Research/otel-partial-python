@@ -14,10 +14,12 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import threading
 import time
-from typing import TYPE_CHECKING
+from queue import Queue
+from typing import TYPE_CHECKING, Deque
 
 from google.protobuf import json_format
 from opentelemetry._logs.severity import SeverityNumber
@@ -34,7 +36,27 @@ if TYPE_CHECKING:
 
 WORKER_THREAD_NAME = "OtelPartialSpanProcessor"
 DEFAULT_HEARTBEAT_INTERVAL_MILLIS = 5000
-DEFAULT_HEARTBEAT_DELAY_MILLIS = 5000
+DEFAULT_INITIAL_HEARTBEAT_DELAY_MILLIS = 5000
+DEFAULT_PROCESS_INTERVAL_MILLIS = 5000
+
+
+def validate_parameters(log_exporter, heartbeat_interval_millis,
+    initial_heartbeat_delay_millis, process_interval_millis):
+  if log_exporter is None:
+    msg = "log_exporter must not be None"
+    raise ValueError(msg)
+
+  if heartbeat_interval_millis <= 0:
+    msg = "heartbeat_interval_millis must be greater than 0"
+    raise ValueError(msg)
+
+  if initial_heartbeat_delay_millis < 0:
+    msg = "initial_heartbeat_delay_millis must be greater or equal to 0"
+    raise ValueError(msg)
+
+  if process_interval_millis <= 0:
+    msg = "process_interval_millis must be greater than 0"
+    raise ValueError(msg)
 
 
 class PartialSpanProcessor(SpanProcessor):
@@ -43,23 +65,24 @@ class PartialSpanProcessor(SpanProcessor):
       self,
       log_exporter: LogExporter,
       heartbeat_interval_millis: int = DEFAULT_HEARTBEAT_INTERVAL_MILLIS,
-      heartbeat_delay_millis: int = DEFAULT_HEARTBEAT_DELAY_MILLIS,
+      initial_heartbeat_delay_millis: int = DEFAULT_INITIAL_HEARTBEAT_DELAY_MILLIS,
+      process_interval_millis: int = DEFAULT_PROCESS_INTERVAL_MILLIS,
       resource: Resource | None = None,
   ) -> None:
-    if heartbeat_interval_millis <= 0:
-      msg = "heartbeat_interval_millis must be greater than 0"
-      raise ValueError(msg)
-    self.heartbeat_interval_millis = heartbeat_interval_millis
-
-    if heartbeat_delay_millis < 0:
-      msg = "heartbeat_delay_millis must be greater or equal to 0"
-      raise ValueError(msg)
-    self.heartbeat_delay_millis = heartbeat_delay_millis
+    validate_parameters(log_exporter, heartbeat_interval_millis,
+                        initial_heartbeat_delay_millis, process_interval_millis)
 
     self.log_exporter = log_exporter
+    self.heartbeat_interval_millis = heartbeat_interval_millis
+    self.initial_heartbeat_delay_millis = initial_heartbeat_delay_millis
+    self.process_interval_millis = process_interval_millis
     self.resource = resource
 
     self.active_spans = {}
+    self.delayed_heartbeat_spans: Deque[tuple[int, datetime.datetime]] = Deque[
+      tuple[int, datetime.datetime]]()
+    self.delayed_heartbeat_spans_lookup: set[int] = set()
+    self.ready_heartbeat_spans: Queue[tuple[int, datetime.datetime]] = Queue()
     self.lock = threading.Lock()
 
     self.done = False
@@ -72,38 +95,35 @@ class PartialSpanProcessor(SpanProcessor):
   def worker(self) -> None:
     while not self.done:
       with self.condition:
-        self.condition.wait(self.heartbeat_interval_millis / 1000)
+        self.condition.wait(self.process_interval_millis / 1000)
         if self.done:
           break
 
-      self.heartbeat()
-
-  def heartbeat(self) -> None:
-    with self.lock:
-      current_time_ms = time.time() * 1000
-      for span in list(self.active_spans.values()):
-        span.start_time_ms = span.start_time / 1_000_000
-        if current_time_ms - span.start_time_ms >= self.heartbeat_delay_millis:
-          self.export_log(span, self.get_heartbeat_attributes())
+        self.process_delayed_heartbeat_spans()
+        self.process_ready_heartbeat_spans()
 
   def on_start(self, span: Span,
       parent_context: context_api.Context | None = None) -> None:
-    self.export_log(span, self.get_heartbeat_attributes())
-    self.add_active_span(span)
-
-  def add_active_span(self, span: Span) -> None:
-    span_key = (span.context.trace_id, span.context.span_id)
     with self.lock:
-      self.active_spans[span_key] = span
+      self.active_spans[span.context.span_id] = span
+      self.delayed_heartbeat_spans_lookup.add(span.context.span_id)
+
+      next_heartbeat_time = datetime.datetime.now() + datetime.timedelta(
+        milliseconds=self.initial_heartbeat_delay_millis)
+      self.delayed_heartbeat_spans.appendleft(
+        (span.context.span_id, next_heartbeat_time))
 
   def on_end(self, span: ReadableSpan) -> None:
-    self.export_log(span, get_stop_attributes())
-    self.remove_ended_span(span)
-
-  def remove_ended_span(self, span: ReadableSpan) -> None:
-    span_key = (span.context.trace_id, span.context.span_id)
     with self.lock:
-      self.active_spans.pop(span_key)
+      self.active_spans.pop(span.context.span_id)
+
+      if span.context.span_id in self.delayed_heartbeat_spans_lookup:
+        self.delayed_heartbeat_spans_lookup.remove(span.context.span_id)
+        self.delayed_heartbeat_spans.remove(
+          (span.context.span_id, next(iter(self.delayed_heartbeat_spans))[1]))
+        return
+
+    self.export_log(span, get_stop_attributes())
 
   def export_log(self, span, attributes: dict[str, str]) -> None:
     log_data = self.get_log_data(span, attributes)
@@ -166,6 +186,44 @@ class PartialSpanProcessor(SpanProcessor):
     return LogData(
       log_record=log_record, instrumentation_scope=instrumentation_scope,
     )
+
+  def process_delayed_heartbeat_spans(self) -> None:
+    with self.lock:
+      now = datetime.datetime.now()
+      while self.delayed_heartbeat_spans and self.delayed_heartbeat_spans[-1][
+        1] <= now:
+        span_id, _ = self.delayed_heartbeat_spans.pop()
+        self.delayed_heartbeat_spans_lookup.discard(span_id)
+
+        span = self.active_spans.get(span_id)
+        if not span:
+          continue
+
+        self.export_log(span, self.get_heartbeat_attributes())
+
+        next_heartbeat_time = now + datetime.timedelta(
+          milliseconds=self.heartbeat_interval_millis)
+        self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
+
+  def process_ready_heartbeat_spans(self) -> None:
+    now = datetime.datetime.now()
+    with self.lock:
+      while not self.ready_heartbeat_spans.empty():
+        span_id, next_heartbeat_time = self.ready_heartbeat_spans.queue[0]
+        if next_heartbeat_time > now:
+          break
+
+        self.ready_heartbeat_spans.get()
+
+        span = self.active_spans.get(span_id)
+        if not span:
+          continue
+
+        self.export_log(span, self.get_heartbeat_attributes())
+
+        next_heartbeat_time = now + datetime.timedelta(
+          milliseconds=self.heartbeat_interval_millis)
+        self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
 
 
 def get_stop_attributes() -> dict[str, str]:
