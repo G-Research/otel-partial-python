@@ -207,14 +207,12 @@ class PartialSpanProcessor(SpanProcessor):
         self.delayed_heartbeat_spans.get()
 
         span = self.active_spans.get(span_id)
-        if not span:
-          continue
+        if span:
+          spans_to_be_logged.append(span)
 
-        spans_to_be_logged.append(span)
-
-        next_heartbeat_time = now + datetime.timedelta(
-          milliseconds=self.heartbeat_interval_millis)
-        self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
+          next_heartbeat_time = now + datetime.timedelta(
+            milliseconds=self.heartbeat_interval_millis)
+          self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
 
     for span in spans_to_be_logged:
       self.export_log(span, self.get_heartbeat_attributes())
@@ -234,14 +232,12 @@ class PartialSpanProcessor(SpanProcessor):
         self.ready_heartbeat_spans.get()
 
         span = self.active_spans.get(span_id)
-        if not span:
-          continue
+        if span:
+          spans_to_be_logged.append(span)
 
-        spans_to_be_logged.append(span)
-
-        next_heartbeat_time = now + datetime.timedelta(
-          milliseconds=self.heartbeat_interval_millis)
-        self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
+          next_heartbeat_time = now + datetime.timedelta(
+            milliseconds=self.heartbeat_interval_millis)
+          self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
 
     for span in spans_to_be_logged:
       self.export_log(span, self.get_heartbeat_attributes())
