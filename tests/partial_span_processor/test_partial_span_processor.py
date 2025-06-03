@@ -105,13 +105,20 @@ class TestPartialSpanProcessor(unittest.TestCase):
 
   def test_on_start(self):
     span = TestPartialSpanProcessor.create_mock_span()
-    span_id = span.get_span_context().span_id
+    expected_span_id = span.get_span_context().span_id
+    now = datetime.datetime.now()
     self.processor.on_start(span)
 
-    self.assertIn(span_id, self.processor.active_spans)
-    self.assertIn(span_id, self.processor.delayed_heartbeat_spans_lookup)
-    self.assertIn((span_id, unittest.mock.ANY),
-                  self.processor.delayed_heartbeat_spans)
+    self.assertIn(expected_span_id, self.processor.active_spans)
+    self.assertIn(expected_span_id,
+                  self.processor.delayed_heartbeat_spans_lookup)
+    self.assertEqual(self.processor.delayed_heartbeat_spans.qsize(), 1)
+    (
+      span_id,
+      next_heartbeat_time) = self.processor.delayed_heartbeat_spans.get()
+    self.assertEqual(expected_span_id, span_id)
+    self.assertGreater(next_heartbeat_time, now)
+    self.assertEqual(self.log_exporter.get_finished_logs(), ())
 
   def test_on_end_when_initial_heartbeat_not_sent(self):
     span = TestPartialSpanProcessor.create_mock_span()
@@ -119,16 +126,14 @@ class TestPartialSpanProcessor(unittest.TestCase):
 
     self.processor.active_spans[span_id] = span
     self.processor.delayed_heartbeat_spans_lookup.add(span_id)
-    self.processor.delayed_heartbeat_spans.append(
-      (span_id, unittest.mock.ANY))
+    self.processor.delayed_heartbeat_spans.put((span_id, unittest.mock.ANY))
 
     self.processor.on_end(span)
 
     self.assertNotIn(span_id, self.processor.active_spans)
     self.assertNotIn(span_id,
                      self.processor.delayed_heartbeat_spans_lookup)
-    self.assertNotIn((span_id, unittest.mock.ANY),
-                     self.processor.delayed_heartbeat_spans)
+    self.assertFalse(self.processor.delayed_heartbeat_spans.empty())
     self.assertEqual(self.log_exporter.get_finished_logs(), ())
 
   def test_on_end_when_initial_heartbeat_sent(self):
@@ -155,7 +160,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
 
     self.processor.active_spans[span_id] = span
     now = datetime.datetime.now()
-    self.processor.delayed_heartbeat_spans.append((span_id, now))
+    self.processor.delayed_heartbeat_spans.put((span_id, now))
     self.processor.delayed_heartbeat_spans_lookup.add(span_id)
 
     with patch("datetime.datetime") as mock_datetime:
@@ -163,7 +168,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
       self.processor.process_delayed_heartbeat_spans()
 
     self.assertNotIn(span_id, self.processor.delayed_heartbeat_spans_lookup)
-    self.assertNotIn((span_id, now), self.processor.delayed_heartbeat_spans)
+    self.assertTrue(self.processor.delayed_heartbeat_spans.empty())
 
     next_heartbeat_time = now + datetime.timedelta(
       milliseconds=self.processor.heartbeat_interval_millis)

@@ -18,8 +18,7 @@ import datetime
 import json
 import threading
 import time
-from queue import Queue
-from typing import TYPE_CHECKING, Deque
+from typing import TYPE_CHECKING
 
 from google.protobuf import json_format
 from opentelemetry._logs.severity import SeverityNumber
@@ -28,6 +27,8 @@ from opentelemetry.proto.trace.v1 import trace_pb2
 from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import TraceFlags
+
+from partial_span_processor.peekable_queue import PeekableQueue
 
 if TYPE_CHECKING:
   from opentelemetry import context as context_api
@@ -79,10 +80,11 @@ class PartialSpanProcessor(SpanProcessor):
     self.resource = resource
 
     self.active_spans = {}
-    self.delayed_heartbeat_spans: Deque[tuple[int, datetime.datetime]] = Deque[
-      tuple[int, datetime.datetime]]()
+    self.delayed_heartbeat_spans: PeekableQueue[tuple[int, datetime.datetime]] = \
+      PeekableQueue()
     self.delayed_heartbeat_spans_lookup: set[int] = set()
-    self.ready_heartbeat_spans: Queue[tuple[int, datetime.datetime]] = Queue()
+    self.ready_heartbeat_spans: PeekableQueue[
+      tuple[int, datetime.datetime]] = PeekableQueue()
     self.lock = threading.Lock()
 
     self.done = False
@@ -110,18 +112,20 @@ class PartialSpanProcessor(SpanProcessor):
 
       next_heartbeat_time = datetime.datetime.now() + datetime.timedelta(
         milliseconds=self.initial_heartbeat_delay_millis)
-      self.delayed_heartbeat_spans.appendleft(
+      self.delayed_heartbeat_spans.put(
         (span.context.span_id, next_heartbeat_time))
 
   def on_end(self, span: ReadableSpan) -> None:
+    is_delayed_heartbeat_pending = False
     with self.lock:
       self.active_spans.pop(span.context.span_id)
 
       if span.context.span_id in self.delayed_heartbeat_spans_lookup:
+        is_delayed_heartbeat_pending = True
         self.delayed_heartbeat_spans_lookup.remove(span.context.span_id)
-        self.delayed_heartbeat_spans.remove(
-          (span.context.span_id, next(iter(self.delayed_heartbeat_spans))[1]))
-        return
+
+    if is_delayed_heartbeat_pending:
+      return
 
     self.export_log(span, get_stop_attributes())
 
@@ -188,28 +192,42 @@ class PartialSpanProcessor(SpanProcessor):
     )
 
   def process_delayed_heartbeat_spans(self) -> None:
-    with self.lock:
+    spans_to_be_logged = []
+    with (self.lock):
       now = datetime.datetime.now()
-      while self.delayed_heartbeat_spans and self.delayed_heartbeat_spans[-1][
-        1] <= now:
-        span_id, _ = self.delayed_heartbeat_spans.pop()
+      while True:
+        if self.delayed_heartbeat_spans.empty():
+          break
+
+        (span_id, next_heartbeat_time) = self.delayed_heartbeat_spans.peek()
+        if next_heartbeat_time > now:
+          break
+
         self.delayed_heartbeat_spans_lookup.discard(span_id)
+        self.delayed_heartbeat_spans.get()
 
         span = self.active_spans.get(span_id)
         if not span:
           continue
 
-        self.export_log(span, self.get_heartbeat_attributes())
+        spans_to_be_logged.append(span)
 
         next_heartbeat_time = now + datetime.timedelta(
           milliseconds=self.heartbeat_interval_millis)
         self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
 
+    for span in spans_to_be_logged:
+      self.export_log(span, self.get_heartbeat_attributes())
+
   def process_ready_heartbeat_spans(self) -> None:
+    spans_to_be_logged = []
     now = datetime.datetime.now()
     with self.lock:
-      while not self.ready_heartbeat_spans.empty():
-        span_id, next_heartbeat_time = self.ready_heartbeat_spans.queue[0]
+      while True:
+        if self.ready_heartbeat_spans.empty():
+          break
+
+        (span_id, next_heartbeat_time) = self.ready_heartbeat_spans.peek()
         if next_heartbeat_time > now:
           break
 
@@ -219,11 +237,14 @@ class PartialSpanProcessor(SpanProcessor):
         if not span:
           continue
 
-        self.export_log(span, self.get_heartbeat_attributes())
+        spans_to_be_logged.append(span)
 
         next_heartbeat_time = now + datetime.timedelta(
           milliseconds=self.heartbeat_interval_millis)
         self.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
+
+    for span in spans_to_be_logged:
+      self.export_log(span, self.get_heartbeat_attributes())
 
 
 def get_stop_attributes() -> dict[str, str]:
