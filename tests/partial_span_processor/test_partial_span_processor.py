@@ -12,111 +12,193 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import unittest
-from time import sleep
+from unittest import mock
+from unittest.mock import patch
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Span, SpanContext, TraceFlags
 
 from src.partial_span_processor import PartialSpanProcessor
-from tests.partial_span_processor.in_memory_log_exporter import InMemoryLogExporter
+from tests.partial_span_processor.in_memory_log_exporter import \
+  InMemoryLogExporter
 
 
 class TestPartialSpanProcessor(unittest.TestCase):
   def setUp(self) -> None:
-    # Set up an in-memory log exporter and processor
     self.log_exporter = InMemoryLogExporter()
     self.processor = PartialSpanProcessor(
       log_exporter=self.log_exporter,
-      heartbeat_interval_millis=1000,  # 1 second
+      heartbeat_interval_millis=1000,
+      initial_heartbeat_delay_millis=1000,
+      process_interval_millis=1000,
       resource=Resource(attributes={"service.name": "test"}),
     )
 
   def tearDown(self) -> None:
-    # Shut down the processor
     self.processor.shutdown()
 
-  def create_mock_span(self, trace_id: int = 1, span_id: int = 1) -> Span:
-    # Create a mock tracer
+  @staticmethod
+  def create_mock_span(trace_id: int = 1, span_id: int = 1) -> Span:
     tracer_provider = TracerProvider(resource=Resource.create({}))
     tracer = tracer_provider.get_tracer("test_tracer")
 
-    # Start a span using the tracer
     with tracer.start_as_current_span("test_span") as span:
-      # Set the span context manually for testing purposes
       span_context = SpanContext(
         trace_id=trace_id,
         span_id=span_id,
         is_remote=False,
         trace_flags=TraceFlags(TraceFlags.SAMPLED),
       )
-      span._context = span_context  # Modify the span's context for testing
+      span._context = span_context
       return span
 
-  def test_on_start(self) -> None:
-    # Test the on_start method
-    span = self.create_mock_span()
-    self.processor.on_start(span)
-
-    # Verify the span is added to active_spans
-    span_key = (span.context.trace_id, span.context.span_id)
-    assert span_key in self.processor.active_spans
-
-    # Verify a log is emitted
-    logs = self.log_exporter.get_finished_logs()
-    assert len(logs) == 1
-    assert logs[0].log_record.attributes["partial.event"] == "heartbeat"
-    assert logs[0].log_record.resource.attributes["service.name"] == "test"
-
-  def test_on_end(self) -> None:
-    # Test the on_end method
-    span = self.create_mock_span()
-    self.processor.on_start(span)
-    self.processor.on_end(span)
-
-    # Verify the span is added to ended_spans
-    assert not self.processor.ended_spans.empty()
-
-    # Verify a log is emitted
-    logs = self.log_exporter.get_finished_logs()
-    assert len(logs) == 2
-    assert logs[1].log_record.attributes["partial.event"] == "stop"
-    assert logs[0].log_record.resource.attributes["service.name"] == "test"
-
-  def test_heartbeat(self) -> None:
-    # Test the heartbeat method
-    span = self.create_mock_span()
-    self.processor.on_start(span)
-
-    # Wait for the heartbeat interval
-    sleep(1.5)
-    logs = self.log_exporter.get_finished_logs()
-
-    # Verify heartbeat logs are emitted
-    assert len(logs) >= 2
-    assert logs[1].log_record.attributes["partial.event"] == "heartbeat"
-    assert logs[0].log_record.resource.attributes["service.name"] == "test"
-
   def test_shutdown(self) -> None:
-    # Test the shutdown method
     self.processor.shutdown()
 
-    # Verify the worker thread is stopped
-    assert self.processor.done
+    self.assertTrue(self.processor.done)
 
-  def test_worker_thread(self) -> None:
-    # Test the worker thread processes ended spans
-    span = self.create_mock_span()
+  def test_invalid_log_exporter(self):
+    with self.assertRaises(ValueError) as context:
+      PartialSpanProcessor(
+        log_exporter=None,
+        heartbeat_interval_millis=1000,
+        initial_heartbeat_delay_millis=1000,
+        process_interval_millis=1000,
+      )
+    self.assertEqual(str(context.exception), "log_exporter must not be None")
+
+  def test_invalid_heartbeat_interval(self):
+    with self.assertRaises(ValueError) as context:
+      PartialSpanProcessor(
+        log_exporter=InMemoryLogExporter(),
+        heartbeat_interval_millis=0,
+        initial_heartbeat_delay_millis=1000,
+        process_interval_millis=1000,
+      )
+    self.assertEqual(str(context.exception),
+                     "heartbeat_interval_millis must be greater than 0")
+
+  def test_invalid_initial_heartbeat_delay(self):
+    with self.assertRaises(ValueError) as context:
+      PartialSpanProcessor(
+        log_exporter=InMemoryLogExporter(),
+        heartbeat_interval_millis=1000,
+        initial_heartbeat_delay_millis=-1,
+        process_interval_millis=1000,
+      )
+    self.assertEqual(str(context.exception),
+                     "initial_heartbeat_delay_millis must be greater or equal to 0")
+
+  def test_invalid_process_interval(self):
+    with self.assertRaises(ValueError) as context:
+      PartialSpanProcessor(
+        log_exporter=InMemoryLogExporter(),
+        heartbeat_interval_millis=1000,
+        initial_heartbeat_delay_millis=1000,
+        process_interval_millis=0,
+      )
+    self.assertEqual(str(context.exception),
+                     "process_interval_millis must be greater than 0")
+
+  def test_on_start(self):
+    span = TestPartialSpanProcessor.create_mock_span()
+    expected_span_id = span.get_span_context().span_id
+    now = datetime.datetime.now()
     self.processor.on_start(span)
+
+    self.assertIn(expected_span_id, self.processor.active_spans)
+    self.assertIn(expected_span_id,
+                  self.processor.delayed_heartbeat_spans_lookup)
+    self.assertEqual(self.processor.delayed_heartbeat_spans.qsize(), 1)
+    (
+      span_id,
+      next_heartbeat_time) = self.processor.delayed_heartbeat_spans.get()
+    self.assertEqual(expected_span_id, span_id)
+    self.assertGreater(next_heartbeat_time, now)
+    self.assertEqual(self.log_exporter.get_finished_logs(), ())
+
+  def test_on_end_when_initial_heartbeat_not_sent(self):
+    span = TestPartialSpanProcessor.create_mock_span()
+    span_id = span.get_span_context().span_id
+
+    self.processor.active_spans[span_id] = span
+    self.processor.delayed_heartbeat_spans_lookup.add(span_id)
+    self.processor.delayed_heartbeat_spans.put((span_id, unittest.mock.ANY))
+
     self.processor.on_end(span)
 
-    # Wait for the worker thread to process the ended span
-    sleep(1.5)
+    self.assertNotIn(span_id, self.processor.active_spans)
+    self.assertNotIn(span_id,
+                     self.processor.delayed_heartbeat_spans_lookup)
+    self.assertFalse(self.processor.delayed_heartbeat_spans.empty())
+    self.assertEqual(self.log_exporter.get_finished_logs(), ())
 
-    # Verify the span is removed from active_spans
-    span_key = (span.context.trace_id, span.context.span_id)
-    assert span_key not in self.processor.active_spans
+  def test_on_end_when_initial_heartbeat_sent(self):
+    span = TestPartialSpanProcessor.create_mock_span()
+    span_id = span.get_span_context().span_id
+
+    self.processor.active_spans[span_id] = span
+
+    self.processor.on_end(span)
+
+    self.assertNotIn(span_id, self.processor.active_spans)
+
+    logs = self.log_exporter.get_finished_logs()
+    self.assertEqual(len(logs), 1)
+    self.assertEqual(logs[0].log_record.attributes["partial.event"], "stop")
+    self.assertEqual(logs[0].log_record.attributes["partial.body.type"],
+                     "json/v1")
+    self.assertEqual(logs[0].log_record.resource.attributes["service.name"],
+                     "test")
+
+  def test_process_delayed_heartbeat_spans(self):
+    span = TestPartialSpanProcessor.create_mock_span()
+    span_id = span.get_span_context().span_id
+
+    self.processor.active_spans[span_id] = span
+    now = datetime.datetime.now()
+    self.processor.delayed_heartbeat_spans.put((span_id, now))
+    self.processor.delayed_heartbeat_spans_lookup.add(span_id)
+
+    with patch("datetime.datetime") as mock_datetime:
+      mock_datetime.now.return_value = now
+      self.processor.process_delayed_heartbeat_spans()
+
+    self.assertNotIn(span_id, self.processor.delayed_heartbeat_spans_lookup)
+    self.assertTrue(self.processor.delayed_heartbeat_spans.empty())
+
+    next_heartbeat_time = now + datetime.timedelta(
+      milliseconds=self.processor.heartbeat_interval_millis)
+    self.assertFalse(self.processor.ready_heartbeat_spans.empty())
+    self.assertEqual(self.processor.ready_heartbeat_spans.get(),
+                     (span_id, next_heartbeat_time))
+
+  def test_process_ready_heartbeat_spans(self):
+    span = TestPartialSpanProcessor.create_mock_span()
+    span_id = span.get_span_context().span_id
+
+    self.processor.active_spans[span_id] = span
+    now = datetime.datetime.now()
+    next_heartbeat_time = now
+    self.processor.ready_heartbeat_spans.put((span_id, next_heartbeat_time))
+
+    with patch("datetime.datetime") as mock_datetime:
+      mock_datetime.now.return_value = now
+      self.processor.process_ready_heartbeat_spans()
+
+    updated_next_heartbeat_time = now + datetime.timedelta(
+      milliseconds=self.processor.heartbeat_interval_millis)
+    self.assertTrue(self.processor.ready_heartbeat_spans.qsize() == 1)
+    self.assertEqual(self.processor.ready_heartbeat_spans.get(),
+                     (span_id, updated_next_heartbeat_time))
+
+    logs = self.log_exporter.get_finished_logs()
+    self.assertEqual(len(logs), 1)
+    self.assertEqual(logs[0].log_record.attributes["partial.event"],
+                     "heartbeat")
 
 
 if __name__ == "__main__":
