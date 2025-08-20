@@ -200,6 +200,73 @@ class TestPartialSpanProcessor(unittest.TestCase):
     self.assertEqual(logs[0].log_record.attributes["partial.event"],
                      "heartbeat")
 
+  @patch('src.partial_span_processor._logger')
+  def test_export_log_handles_export_exception(self, mock_logger):
+    # Create a mock log exporter that raises an exception
+    failing_exporter = mock.Mock()
+    failing_exporter.export.side_effect = Exception("Export failed")
+
+    # Create processor with failing exporter
+    processor = PartialSpanProcessor(
+      log_exporter=failing_exporter,
+      heartbeat_interval_millis=1000,
+      initial_heartbeat_delay_millis=1000,
+      process_interval_millis=1000,
+    )
+
+    try:
+      span = TestPartialSpanProcessor.create_mock_span()
+
+      # This should not raise an exception despite the exporter failing
+      processor.export_log(span, {"test": "attribute"})
+
+      # Verify the exception was logged
+      mock_logger.exception.assert_called_once_with(
+        "Exception while exporting logs.")
+
+      # Verify export was attempted
+      failing_exporter.export.assert_called_once()
+    finally:
+      processor.shutdown()
+
+  @patch('src.partial_span_processor._logger')
+  def test_export_log_handles_runtime_error(self, mock_logger):
+    # Create a mock log exporter that raises a RuntimeError
+    failing_exporter = mock.Mock()
+    failing_exporter.export.side_effect = RuntimeError(
+      "Runtime error during export")
+
+    processor = PartialSpanProcessor(
+      log_exporter=failing_exporter,
+      heartbeat_interval_millis=1000,
+      initial_heartbeat_delay_millis=1000,
+      process_interval_millis=1000,
+    )
+
+    try:
+      span = TestPartialSpanProcessor.create_mock_span()
+
+      # This should not raise an exception
+      processor.export_log(span, {"test": "attribute"})
+
+      # Verify the exception was logged
+      mock_logger.exception.assert_called_once_with(
+        "Exception while exporting logs.")
+    finally:
+      processor.shutdown()
+
+  def test_export_log_succeeds_normally(self):
+    # Test that normal operation still works
+    span = TestPartialSpanProcessor.create_mock_span()
+
+    # This should work normally
+    self.processor.export_log(span, {"test": "attribute"})
+
+    # Verify log was exported successfully
+    logs = self.log_exporter.get_finished_logs()
+    self.assertEqual(len(logs), 1)
+    self.assertEqual(logs[0].log_record.attributes["test"], "attribute")
+
 
 if __name__ == "__main__":
   unittest.main()

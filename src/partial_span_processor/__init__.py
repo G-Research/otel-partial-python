@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -28,7 +29,7 @@ from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import TraceFlags
 
-from partial_span_processor.peekable_queue import PeekableQueue
+from .peekable_queue import PeekableQueue
 
 if TYPE_CHECKING:
   from opentelemetry import context as context_api
@@ -40,6 +41,7 @@ DEFAULT_HEARTBEAT_INTERVAL_MILLIS = 5000
 DEFAULT_INITIAL_HEARTBEAT_DELAY_MILLIS = 5000
 DEFAULT_PROCESS_INTERVAL_MILLIS = 5000
 
+_logger = logging.getLogger(__name__)
 
 def validate_parameters(log_exporter, heartbeat_interval_millis,
     initial_heartbeat_delay_millis, process_interval_millis):
@@ -131,7 +133,10 @@ class PartialSpanProcessor(SpanProcessor):
 
   def export_log(self, span, attributes: dict[str, str]) -> None:
     log_data = self.get_log_data(span, attributes)
-    self.log_exporter.export([log_data])
+    try:
+      self.log_exporter.export([log_data])
+    except Exception:
+      _logger.exception("Exception while exporting logs.")
 
   def shutdown(self) -> None:
     # signal the worker thread to finish and then wait for it
