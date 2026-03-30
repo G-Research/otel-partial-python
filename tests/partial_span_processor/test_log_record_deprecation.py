@@ -1,26 +1,39 @@
-import time
 import unittest
 import warnings
 
-from opentelemetry._logs.severity import SeverityNumber
-from opentelemetry.sdk._logs import LogRecord
-from opentelemetry.trace import TraceFlags
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.trace import SpanContext, TraceFlags
+
+from src.partial_span_processor import PartialSpanProcessor
+from tests.partial_span_processor.in_memory_log_exporter import InMemoryLogExporter
 
 
 class TestLogRecordDeprecation(unittest.TestCase):
-    def test_trace_id_span_id_trace_flags_params_are_deprecated(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            LogRecord(
-                timestamp=time.time_ns(),
-                observed_timestamp=time.time_ns(),
+    def setUp(self):
+        self.processor = PartialSpanProcessor(
+            log_exporter=InMemoryLogExporter(),
+            heartbeat_interval_millis=1000,
+            initial_heartbeat_delay_millis=1000,
+            process_interval_millis=1000,
+            resource=Resource(attributes={"service.name": "test"}),
+        )
+
+    def tearDown(self):
+        self.processor.shutdown()
+
+    def test_get_log_data_produces_no_deprecation_warnings(self):
+        tracer = TracerProvider().get_tracer("test")
+        with tracer.start_as_current_span("test_span") as span:
+            span._context = SpanContext(
                 trace_id=0x1234567890abcdef1234567890abcdef,
                 span_id=0x1234567890abcdef,
-                trace_flags=TraceFlags().get_default(),
-                severity_text="INFO",
-                severity_number=SeverityNumber.INFO,
-                body="test",
+                is_remote=False,
+                trace_flags=TraceFlags(TraceFlags.SAMPLED),
             )
-        self.assertEqual(len(w), 1)
-        self.assertIn("deprecated", str(w[0].message).lower())
-        self.assertIn("context", str(w[0].message).lower())
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                self.processor.get_log_data(span, {"partial.event": "heartbeat"})
+
+        deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        self.assertEqual(len(deprecation_warnings), 0)
