@@ -27,7 +27,7 @@ from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.proto.trace.v1 import trace_pb2
 from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
-from opentelemetry.trace import TraceFlags
+from opentelemetry.trace import set_span_in_context
 
 from .peekable_queue import PeekableQueue
 
@@ -172,20 +172,18 @@ class PartialSpanProcessor(SpanProcessor):
     traces_dict = json.loads(serialized_traces_data)
     for resource_span in traces_dict.get("resourceSpans", []):
       for scope_span in resource_span.get("scopeSpans", []):
-        for span in scope_span.get("spans", []):
-          span["traceId"] = f"{span_context.trace_id:032x}"
-          span["spanId"] = f"{span_context.span_id:016x}"
+        for span_dict in scope_span.get("spans", []):
+          span_dict["traceId"] = f"{span_context.trace_id:032x}"
+          span_dict["spanId"] = f"{span_context.span_id:016x}"
           if parent:
-            span["parentSpanId"] = f"{parent.span_id:016x}"
+            span_dict["parentSpanId"] = f"{parent.span_id:016x}"
 
     serialized_traces_data = json.dumps(traces_dict, separators=(",", ":"))
 
     log_record = LogRecord(
       timestamp=time.time_ns(),
       observed_timestamp=time.time_ns(),
-      trace_id=span_context.trace_id,
-      span_id=span_context.span_id,
-      trace_flags=TraceFlags().get_default(),
+      context=set_span_in_context(span),
       severity_text="INFO",
       severity_number=SeverityNumber.INFO,
       body=serialized_traces_data,
