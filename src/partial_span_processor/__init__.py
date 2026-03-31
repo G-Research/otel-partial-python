@@ -25,7 +25,8 @@ from google.protobuf import json_format
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.proto.trace.v1 import trace_pb2
-from opentelemetry.sdk._logs import LogData, LogRecord
+from opentelemetry._logs import LogRecord
+from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import set_span_in_context
 
@@ -152,7 +153,7 @@ class PartialSpanProcessor(SpanProcessor):
       "partial.body.type": "json/v1",
     }
 
-  def get_log_data(self, span: Span, attributes: dict[str, str]) -> LogData:
+  def get_log_data(self, span: Span, attributes: dict[str, str]) -> ReadableLogRecord:
     instrumentation_scope = span.instrumentation_scope if hasattr(span,
                                                                   "instrumentation_scope") else None
     span_context = span.get_span_context()
@@ -187,11 +188,12 @@ class PartialSpanProcessor(SpanProcessor):
       severity_text="INFO",
       severity_number=SeverityNumber.INFO,
       body=serialized_traces_data,
-      resource=self.resource,
       attributes=attributes,
     )
-    return LogData(
-      log_record=log_record, instrumentation_scope=instrumentation_scope,
+    return ReadableLogRecord(
+      log_record=log_record,
+      resource=self.resource,
+      instrumentation_scope=instrumentation_scope,
     )
 
   def process_delayed_heartbeat_spans(self) -> None:

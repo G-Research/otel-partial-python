@@ -17,10 +17,8 @@ from __future__ import annotations
 import threading
 import typing
 
+from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import LogExporter, LogExportResult
-
-if typing.TYPE_CHECKING:
-  from opentelemetry.sdk._logs import LogData
 
 
 class InMemoryLogExporter(LogExporter):
@@ -40,11 +38,11 @@ class InMemoryLogExporter(LogExporter):
     with self._lock:
       self._logs.clear()
 
-  def get_finished_logs(self) -> tuple[LogData, ...]:
+  def get_finished_logs(self) -> tuple[ReadableLogRecord, ...]:
     with self._lock:
       return tuple(self._logs)
 
-  def export(self, batch: typing.Sequence[LogData]) -> LogExportResult:
+  def export(self, batch: typing.Sequence[ReadableLogRecord]) -> LogExportResult:
     if self._stopped:
       return LogExportResult.FAILURE
     with self._lock:

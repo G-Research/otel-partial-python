@@ -151,7 +151,7 @@ class TestPartialSpanProcessor(unittest.TestCase):
     self.assertEqual(logs[0].log_record.attributes["partial.event"], "stop")
     self.assertEqual(logs[0].log_record.attributes["partial.body.type"],
                      "json/v1")
-    self.assertEqual(logs[0].log_record.resource.attributes["service.name"],
+    self.assertEqual(logs[0].resource.attributes["service.name"],
                      "test")
 
   def test_process_delayed_heartbeat_spans(self):
