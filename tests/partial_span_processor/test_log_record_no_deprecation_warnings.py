@@ -9,7 +9,7 @@ from src.partial_span_processor import PartialSpanProcessor
 from tests.partial_span_processor.in_memory_log_exporter import InMemoryLogExporter
 
 
-class TestLogRecordDeprecation(unittest.TestCase):
+class TestLogRecordNoDeprecationWarnings(unittest.TestCase):
     def setUp(self):
         self.processor = PartialSpanProcessor(
             log_exporter=InMemoryLogExporter(),

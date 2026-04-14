@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import datetime
+import inspect
 import json
 import logging
 import threading
@@ -26,15 +27,15 @@ from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.proto.trace.v1 import trace_pb2
 from opentelemetry.sdk._logs import LogData, LogRecord
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
-from opentelemetry.trace import set_span_in_context
+from opentelemetry.trace import TraceFlags, set_span_in_context
 
 from .peekable_queue import PeekableQueue
 
 if TYPE_CHECKING:
   from opentelemetry import context as context_api
   from opentelemetry.sdk._logs.export import LogExporter
-  from opentelemetry.sdk.resources import Resource
 
 WORKER_THREAD_NAME = "OtelPartialSpanProcessor"
 DEFAULT_HEARTBEAT_INTERVAL_MILLIS = 5000
@@ -42,6 +43,7 @@ DEFAULT_INITIAL_HEARTBEAT_DELAY_MILLIS = 5000
 DEFAULT_PROCESS_INTERVAL_MILLIS = 5000
 
 _logger = logging.getLogger(__name__)
+_LOGRECORD_HAS_CONTEXT_PARAM = "context" in inspect.signature(LogRecord.__init__).parameters
 
 def validate_parameters(log_exporter, heartbeat_interval_millis,
     initial_heartbeat_delay_millis, process_interval_millis):
@@ -155,6 +157,7 @@ class PartialSpanProcessor(SpanProcessor):
   def get_log_data(self, span: Span, attributes: dict[str, str]) -> LogData:
     instrumentation_scope = span.instrumentation_scope if hasattr(span,
                                                                   "instrumentation_scope") else None
+    resource = self.resource if self.resource is not None else Resource({})
     span_context = span.get_span_context()
     parent = span.parent
 
@@ -180,16 +183,30 @@ class PartialSpanProcessor(SpanProcessor):
 
     serialized_traces_data = json.dumps(traces_dict, separators=(",", ":"))
 
-    log_record = LogRecord(
-      timestamp=time.time_ns(),
-      observed_timestamp=time.time_ns(),
-      context=set_span_in_context(span),
-      severity_text="INFO",
-      severity_number=SeverityNumber.INFO,
-      body=serialized_traces_data,
-      resource=self.resource,
-      attributes=attributes,
-    )
+    if _LOGRECORD_HAS_CONTEXT_PARAM:
+      log_record = LogRecord(
+        timestamp=time.time_ns(),
+        observed_timestamp=time.time_ns(),
+        context=set_span_in_context(span),
+        severity_text="INFO",
+        severity_number=SeverityNumber.INFO,
+        body=serialized_traces_data,
+        resource=resource,
+        attributes=attributes,
+      )
+    else:
+      log_record = LogRecord(
+        timestamp=time.time_ns(),
+        observed_timestamp=time.time_ns(),
+        trace_id=span_context.trace_id,
+        span_id=span_context.span_id,
+        trace_flags=span_context.trace_flags,
+        severity_text="INFO",
+        severity_number=SeverityNumber.INFO,
+        body=serialized_traces_data,
+        resource=resource,
+        attributes=attributes,
+      )
     return LogData(
       log_record=log_record, instrumentation_scope=instrumentation_scope,
     )
